@@ -64,19 +64,38 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
   if (!isec.hit) return eval_environment(scene, ray.d);
 
   const auto& instance = scene.instances[isec.instance];
-  const auto& material = scene.materials[instance.material];
   const auto& shape    = scene.shapes[instance.shape];
-  auto        normal   = transform_direction(instance.frame, eval_normal(shape, isec.element, isec.uv));
-  auto  radiance = material.emission;
-  auto outgoing = ray.d;
-  auto  position = transform_point(instance.frame,eval_position(shape, isec.element, isec.uv));
+  auto outgoing = -ray.d;
 
-  auto texcoord = eval_texcoord(shape, isec.element, isec.uv);
-  auto color = material.color * rgba_to_rgb(eval_texture(scene,material.color_tex,texcoord,true));
+  //position,normal texcoord
+  auto&  position = transform_point(instance.frame,eval_position(shape, isec.element, isec.uv));
+  auto& normal = transform_direction(instance.frame, eval_normal(shape, isec.element, isec.uv));
+  auto& texcoord = eval_texcoord(shape, isec.element, isec.uv);
 
-  
+  //material values
+  const auto& material = eval_material(scene,instance,isec.element,isec.uv);
+ // scene.materials[instance.material];
+  auto& color = material.color;
+
+  // opacity
+  if (rand1f(rng) < 1 - material.opacity)
+    return shade_indirect(scene, ray3f{position, ray.d}, bounce + 1, max_bounces, bvh, rng);
+
+  //radiance
+  auto radiance = material.emission;
+
   if (bounce >= max_bounces) return radiance;
 
+
+  if (!shape.points.empty()) {
+    normal = -ray.d;
+  } else if (!shape.lines.empty()) {
+    normal = orthonormalize(-ray.d, normal);
+  } else if (!shape.triangles.empty()) {
+    if (dot(-ray.d, normal) < 0) {
+      normal = -normal;
+    }
+  }
 
   switch (material.type) {
     case material_type::matte: {
@@ -88,23 +107,21 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
     break;
 
     case material_type::reflective: {
-      if (material.roughness) {
+      if (!material.roughness) {//polished metal
         auto incoming = reflect(outgoing, normal);
         radiance += fresnel_schlick(color, normal, outgoing) *
                     shade_indirect(scene, ray3f{position, incoming},
                         bounce + 1, max_bounces, bvh, rng);
-      } else {
-        auto exponent = 2 / pow(material.roughness, 4);
-        auto halfway  = sample_hemisphere_cospower(
-            exponent, normal, rand2f(rng));
+      } 
+      else {//rough metal
+        float exponent = 2 / (material.roughness * material.roughness);
+        auto halfway = sample_hemisphere_cospower(exponent,normal, rand2f(rng));
         auto incoming = reflect(outgoing, halfway);
-        radiance += fresnel_schlick(color, halfway, outgoing) *
-                    shade_indirect(scene, ray3f{position, incoming}, bounce + 1,
-                        max_bounces, bvh, rng);
+        radiance += fresnel_schlick(color, halfway, outgoing)*shade_indirect(scene, ray3f{position, incoming}, bounce + 1, max_bounces, bvh, rng);
       };
     };
     break;
-    case material_type::glossy: {
+    case material_type::glossy: { //rough plastic
       auto incoming = sample_hemisphere(normal, rand2f(rng));
       auto halfway  = normalize(outgoing + incoming);
       radiance +=
@@ -120,17 +137,13 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
           dot(normal, incoming);
     };
     break;
-    case material_type::transparent : {
-      if (rand1f(rng) <
-          fresnel_schlick(vec3f{0.04}, normal, outgoing).x) {
-        auto incoming = reflect(outgoing, normal);
-        radiance += shade_indirect(scene, ray3f{position, incoming}, bounce + 1,
-            max_bounces,  bvh,  rng);
+    case material_type::transparent : { //polished dielectrics
+      if (rand1f(rng) <fresnel_schlick(vec3f{0.04}, normal, outgoing).x) {
+        auto& incoming = reflect(outgoing, normal);
+        radiance += shade_indirect(scene, ray3f{position, incoming}, bounce + 1,max_bounces,  bvh,  rng);
       } else {
-        auto incoming = -outgoing;
-        radiance += color * shade_indirect(scene,
-                                         ray3f{position, incoming}, bounce + 1,
-                                         max_bounces, bvh, rng);
+        auto& incoming = -outgoing;
+        radiance += color * shade_indirect(scene,ray3f{position, incoming}, bounce + 1, max_bounces, bvh, rng);
       }
     }
   }
