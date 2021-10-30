@@ -27,7 +27,7 @@
 //
 
 #include "yocto_raytrace.h"
-
+#include <iostream>
 #include <yocto/yocto_cli.h>
 #include <yocto/yocto_geometry.h>
 #include <yocto/yocto_parallel.h>
@@ -96,15 +96,15 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
       normal = -normal;
     }
   }
-
   switch (material.type) {
     case material_type::matte: {
       auto incoming = sample_hemisphere_cos(normal, rand2f(rng));
       radiance += color * shade_indirect(scene,
                                        ray3f{position, incoming}, bounce + 1,
                                        max_bounces, bvh, rng);
-    };
-    break;
+      break;
+    }
+   
 
     case material_type::reflective: {
       if (!material.roughness) {//polished metal
@@ -117,26 +117,26 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
         float exponent = 2 / (material.roughness * material.roughness);
         auto halfway = sample_hemisphere_cospower(exponent,normal, rand2f(rng));
         auto incoming = reflect(outgoing, halfway);
-        radiance += fresnel_schlick(color, halfway, outgoing)*shade_indirect(scene, ray3f{position, incoming}, bounce + 1, max_bounces, bvh, rng);
+        radiance += color*shade_indirect(scene, ray3f{position, incoming}, bounce + 1, max_bounces, bvh, rng);
       };
-    };
-    break;
+      break;
+    }
+   
     case material_type::glossy: { //rough plastic
-      auto incoming = sample_hemisphere(normal, rand2f(rng));
-      auto halfway  = normalize(outgoing + incoming);
-      radiance +=
-          (2 * pi) *
-          (color / pi * (1 - fresnel_schlick(vec3f{0.04}, halfway, outgoing)) +
-              fresnel_schlick(vec3f{0.04}, halfway, outgoing) *
-                  microfacet_distribution(material.roughness, normal, halfway) *
-                  microfacet_shadowing(
-                      material.roughness, normal, halfway, outgoing, incoming) /
-                  (4 * dot(normal, outgoing) * dot(normal, incoming))) *
-          shade_indirect(scene, ray3f{position, incoming}, bounce + 1,
-              max_bounces, bvh, rng) *
-          dot(normal, incoming);
-    };
-    break;
+      float exponent = 2 / (material.roughness * material.roughness);
+      auto  halfway = sample_hemisphere_cospower(exponent, normal, rand2f(rng));
+      if (rand1f(rng) < fresnel_schlick(vec3f{0.04}, halfway, outgoing).x) {
+        auto& incoming = reflect(outgoing, halfway);
+        radiance += shade_indirect(scene, ray3f{position, incoming}, bounce + 1,
+            max_bounces, bvh, rng);
+      } else {
+        auto& incoming = sample_hemisphere_cos(normal, rand2f(rng));
+        radiance += color * shade_indirect(scene, ray3f{position, incoming},
+                                bounce + 1, max_bounces, bvh, rng);
+      }
+      break;
+    }
+    
     case material_type::transparent : { //polished dielectrics
       if (rand1f(rng) <fresnel_schlick(vec3f{0.04}, normal, outgoing).x) {
         auto& incoming = reflect(outgoing, normal);
@@ -145,6 +145,25 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
         auto& incoming = -outgoing;
         radiance += color * shade_indirect(scene,ray3f{position, incoming}, bounce + 1, max_bounces, bvh, rng);
       }
+      break;
+    }
+    case material_type::refractive: {
+     // std::cout << "loooooooooool";refe
+       // refract
+      if (dot(-ray.d, normal) > 0) {
+       auto& incoming = refract(outgoing,normal,0.04);
+        radiance +=color*shade_indirect(scene, ray3f{position, -incoming},
+                                bounce + 1, max_bounces, bvh, rng);
+      // auto  cos_theta      = fmin(dot(-isec.uv, n), 1.0);
+     //  vec3f r_out_perp     = etai_over_etat * (uv + cos_theta * n);
+       //vec3f r_out_parallel = -sqrt(fabs(1.0 - length_squared(r_out_perp))) * n;
+       //return r_out_perp + r_out_parallel;
+      } else {
+        auto& incoming = reflect(outgoing, normal);
+        radiance +=  color*shade_indirect(scene, ray3f{position, incoming},
+                                bounce + 1, max_bounces, bvh, rng);
+      }
+        break;
     }
   }
   return radiance;

@@ -15,3 +15,4 @@
 .\bin\yraytrace --scene tests\10_hair\hair.json --output out\lowres\10_hair_720_256.jpg --samples 256 --resolution 720
 .\bin\yraytrace --scene tests\11_bathroom1\bathroom1.json --output out\lowres\11_bathroom1_720_256.jpg --samples 256 --bounces  8 --resolution 720
 .\bin\yraytrace --scene tests\12_ecosys\ecosys.json --output out\lowres\12_ecosys_720_256.jpg --samples 256 --resolution 720
+  
