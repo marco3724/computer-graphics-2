@@ -58,6 +58,18 @@ static ray3f eval_camera(const camera_data& camera, const vec2f& uv) {
 // IMPLEMENTATION FOR PATH TRACING
 // -----------------------------------------------------------------------------
 namespace yocto {
+double reflectance(double cosine, double ref_idx) {
+  // Use Schlick's approximation for reflectance.
+  auto r0 = (1 - ref_idx) / (1 + ref_idx);
+  r0      = r0 * r0;
+  return r0 + (1 - r0) * pow((1 - cosine), 5);
+}
+vec3f refract2(const vec3f& uv, const vec3f& n, double etai_over_etat) {
+  auto  cos_theta      = fmin(dot(-uv, n), 1.0);
+  vec3f r_out_perp     = etai_over_etat * (uv + cos_theta * n);
+  vec3f r_out_parallel = -sqrt(fabs(1.0 - length_squared(r_out_perp))) * n;
+  return r_out_perp + r_out_parallel;
+}
 vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
     int max_bounces, const bvh_scene& bvh, rng_state& rng) {  
   auto isec = intersect_bvh(bvh, scene, ray);
@@ -105,7 +117,6 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
       break;
     }
    
-
     case material_type::reflective: {
       if (!material.roughness) {//polished metal
         auto incoming = reflect(outgoing, normal);
@@ -148,21 +159,43 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
       break;
     }
     case material_type::refractive: {
-     // std::cout << "loooooooooool";refe
-       // refract
-      if (dot(-ray.d, normal) > 0) {
-       auto& incoming = refract(outgoing,normal,0.04);
-        radiance +=color*shade_indirect(scene, ray3f{position, -incoming},
-                                bounce + 1, max_bounces, bvh, rng);
-      // auto  cos_theta      = fmin(dot(-isec.uv, n), 1.0);
-     //  vec3f r_out_perp     = etai_over_etat * (uv + cos_theta * n);
-       //vec3f r_out_parallel = -sqrt(fabs(1.0 - length_squared(r_out_perp))) * n;
-       //return r_out_perp + r_out_parallel;
+      // std::cout << "loooooooooool";refe
+      // refrac
+        
+     // auto attenuation      = vec3f{1.0, 1.0, 1.0};
+      auto ior         = material.ior;
+      //std::cout << ior << "\n";
+      float refraction_ratio;
+     
+      if (dot(-ray.d, normal) < 0) {//front face
+        normal           = -normal;
+        refraction_ratio =ior;
       } else {
-        auto& incoming = reflect(outgoing, normal);
-        radiance +=  color*shade_indirect(scene, ray3f{position, incoming},
+        refraction_ratio = (1.0 / ior);
+       
+      }
+      vec3f unit_direction = -ray.d;
+      //vec3f refracted      = refract(unit_direction, normal, refraction_ratio);
+
+      double cos_theta = fmin(dot(-unit_direction, normal), 1.0);
+      double sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+      
+      bool  cannot_refract = refraction_ratio * sin_theta > 1.0;
+      vec3f direction;
+     
+      if (cannot_refract ||
+          rand1f(rng) - 0.1 >
+              fresnel_schlick(vec3f{refraction_ratio}, normal, outgoing).x) {
+      direction = reflect(unit_direction, normal);
+      radiance += color*shade_indirect(scene, ray3f{position,direction},
+                              bounce + 1, max_bounces, bvh, rng);
+    }
+      else {
+        direction = refract(unit_direction, normal, refraction_ratio);
+        radiance +=  color*shade_indirect(scene, ray3f{position,direction},
                                 bounce + 1, max_bounces, bvh, rng);
       }
+    
         break;
     }
   }

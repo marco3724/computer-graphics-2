@@ -78,6 +78,7 @@
       "type": "refractive",
       "color": [0.75, 0.25, 0.25],
       "roughness": 0
+      
     },
     {
       "name": "bunny3",
