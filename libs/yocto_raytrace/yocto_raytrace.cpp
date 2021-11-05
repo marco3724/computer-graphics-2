@@ -183,7 +183,7 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
 
       float max_distance;
       vec3f position2;
-      if (isec2.hit) {  // se ho colpito , setto la seconda posizione e la distanza percorsa dai due raggi
+      if (isec2.hit) {  // se ho colpito , setto la seconda posizione e la distanza percorsa dal raggio dal punto1 al punto2
         position2 = transform_point(instance.frame, eval_position(shape, isec2.element, isec2.uv));
         max_distance = distance(position2, position);  
       } else {                                  
@@ -193,19 +193,17 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
      
      ////material.density = max_distance/ material.density;
       material.density = {0.99, 0.99, 0.99};
-     // auto prob = max_distance / material.density;
-     // auto r          = fmod(rand1f(rng), prob.x);
-     // auto percentage = (prob * 99) / 100;
-      // distanza proprorzionale alla trasmittanza
+
+      // distanza proprorzionale alla trasmittanza, se == max distance allora vuol dire molto trasmittente e attraversa senza scatterare
       auto distance = sample_transmittance( material.density, max_distance, rand1f(rng), rand1f(rng));
-     // printf("maxd: %f | dens: %f %f %f | r: %f | prob: %f | perce: %f \n", max_distance, material.density.x,
-        //  material.density.y, material.density.z, r, prob.x,percentage.x);
+  
       if (distance <max_distance) {
         vec3f scatter_point = position + distance * ray.d;  //punto all'interno dell'istanza in cui scattero
     
         auto  incoming  = sample_sphere( rand2f(rng));//direzione in cui scatterare
         radiance +=  color * shade_indirect(scene, ray3f{scatter_point, incoming}, bounce + 1,max_bounces, bvh, rng);
-      } else {       // se non scattero, attraverso
+      } 
+      else {//attraverso
         radiance += shade_indirect(scene, ray3f{position, ray.d}, bounce + 1,
                 max_bounces, bvh, rng);
       }
@@ -294,6 +292,8 @@ static vec4f shade_matcap(const scene_data& scene, const bvh_scene& bvh,
     auto& material = eval_material(scene, instance, isec.element, isec.uv);
     return vec4f{material.color.x, material.color.y, material.color.z, 1};
   }
+
+
   auto& shape       = scene.shapes[instance.shape];
   auto  normal      = transform_direction(instance.frame, eval_normal(shape, isec.element, isec.uv));
   //auto& material = eval_material(scene, instance, isec.element, isec.uv);
