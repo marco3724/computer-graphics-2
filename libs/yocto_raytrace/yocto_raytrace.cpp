@@ -174,34 +174,26 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
                               bounce + 1, max_bounces, bvh, rng);
         break;
     }
-
-
-   case material_type::volumetric: {
+    case material_type::volumetric: {
       
       //creo un raggio che va sull'altra facciata (se c'e')
       auto isec2       = intersect_bvh(bvh, scene, isec.instance, ray3f{position, ray.d});
 
-      float max_distance;
-      vec3f position2;
+      float max_distance = isec.distance;
+      vec3f position2 = position;
       if (isec2.hit) {  // se ho colpito , setto la seconda posizione e la distanza percorsa dal raggio dal punto1 al punto2
         position2 = transform_point(instance.frame, eval_position(shape, isec2.element, isec2.uv));
         max_distance = distance(position2, position);  
-      } else {                                  
-        position2           = position;
-        max_distance = isec.distance;
-      }
-     
-     ////material.density = max_distance/ material.density;
-      material.density = {0.99, 0.99, 0.99};
+      } 
+      material.density = {0.99,0.99,0.99};
 
       // distanza proprorzionale alla trasmittanza, se == max distance allora vuol dire molto trasmittente e attraversa senza scatterare
       auto distance = sample_transmittance( material.density, max_distance, rand1f(rng), rand1f(rng));
   
       if (distance <max_distance) {
         vec3f scatter_point = position + distance * ray.d;  //punto all'interno dell'istanza in cui scattero
-    
-        auto  incoming  = sample_sphere( rand2f(rng));//direzione in cui scatterare
-        radiance +=  color * shade_indirect(scene, ray3f{scatter_point, incoming}, bounce + 1,max_bounces, bvh, rng);
+        auto direction = sample_sphere( rand2f(rng));//direzione in cui scatterare
+        radiance +=  color * shade_indirect(scene, ray3f{scatter_point, direction}, bounce + 1,max_bounces, bvh, rng);
       } 
       else {//attraverso
         radiance += shade_indirect(scene, ray3f{position, ray.d}, bounce + 1,
