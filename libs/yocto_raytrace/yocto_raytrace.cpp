@@ -58,18 +58,7 @@ static ray3f eval_camera(const camera_data& camera, const vec2f& uv) {
 // IMPLEMENTATION FOR PATH TRACING
 // -----------------------------------------------------------------------------
 namespace yocto {
-double reflectance(double cosine, double ref_idx) {
-  // Use Schlick's approximation for reflectance.
-  auto r0 = (1 - ref_idx) / (1 + ref_idx);
-  r0      = r0 * r0;
-  return r0 + (1 - r0) * pow((1 - cosine), 5);
-}
-vec3f refract2(const vec3f& uv, const vec3f& n, double etai_over_etat) {
-  auto  cos_theta      = fmin(dot(-uv, n), 1.0);
-  vec3f r_out_perp     = etai_over_etat * (uv + cos_theta * n);
-  vec3f r_out_parallel = -sqrt(fabs(1.0 - length_squared(r_out_perp))) * n;
-  return r_out_perp + r_out_parallel;
-}
+
 vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
     int max_bounces, const bvh_scene& bvh, rng_state& rng) {  
   auto isec = intersect_bvh(bvh, scene, ray);
@@ -85,8 +74,7 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
   auto& texcoord = eval_texcoord(shape, isec.element, isec.uv);
 
   //material values
-  const auto& material = eval_material(scene,instance,isec.element,isec.uv);
- // scene.materials[instance.material];
+  auto& material = eval_material(scene,instance,isec.element,isec.uv);
   auto& color = material.color;
 
   // opacity
@@ -97,7 +85,6 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
   auto radiance = material.emission;
 
   if (bounce >= max_bounces) return radiance;
-
 
   if (!shape.points.empty()) {
     normal = -ray.d;
@@ -147,7 +134,6 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
       }
       break;
     }
-    
     case material_type::transparent : { //polished dielectrics
       if (rand1f(rng) <fresnel_schlick(vec3f{0.04}, normal, outgoing).x) {
         auto& incoming = reflect(outgoing, normal);
@@ -159,44 +145,71 @@ vec3f shade_indirect(const scene_data& scene, ray3f ray, int bounce,
       break;
     }
     case material_type::refractive: {
-      // std::cout << "loooooooooool";refe
-      // refrac
-        
-     // auto attenuation      = vec3f{1.0, 1.0, 1.0};
       auto ior         = material.ior;
-      //std::cout << ior << "\n";
       float refraction_ratio;
      
-      if (dot(-ray.d, normal) < 0) {//front face
+      if (dot(-ray.d, normal) <= 0) {// il raggio sta uscendo  (-)
         normal           = -normal;
         refraction_ratio =ior;
-      } else {
+      } 
+      else {//il raggio sta entrando nell'oggetto  (-)
         refraction_ratio = (1.0 / ior);
-       
       }
       vec3f unit_direction = -ray.d;
-      //vec3f refracted      = refract(unit_direction, normal, refraction_ratio);
+  
 
       double cos_theta = fmin(dot(-unit_direction, normal), 1.0);
       double sin_theta = sqrt(1.0 - cos_theta * cos_theta);
-      
       bool  cannot_refract = refraction_ratio * sin_theta > 1.0;
-      vec3f direction;
      
-      if (cannot_refract ||
-          rand1f(rng) - 0.1 >
-              fresnel_schlick(vec3f{refraction_ratio}, normal, outgoing).x) {
-      direction = reflect(unit_direction, normal);
-      radiance += color*shade_indirect(scene, ray3f{position,direction},
-                              bounce + 1, max_bounces, bvh, rng);
-    }
-      else {
+
+      vec3f direction;
+      //se non posso rifrangere, rifletto
+      if (cannot_refract || rand1f(rng) > fresnel_schlick(vec3f{refraction_ratio}, normal, outgoing).x) 
+        direction = reflect(unit_direction, normal);
+      else 
         direction = refract(unit_direction, normal, refraction_ratio);
-        radiance +=  color*shade_indirect(scene, ray3f{position,direction},
-                                bounce + 1, max_bounces, bvh, rng);
-      }
     
+      radiance += color * shade_indirect(scene, ray3f{position, direction},
+                              bounce + 1, max_bounces, bvh, rng);
         break;
+    }
+
+
+   case material_type::volumetric: {
+      
+      //creo un raggio che va sull'altra facciata (se c'e')
+      auto isec2       = intersect_bvh(bvh, scene, isec.instance, ray3f{position, ray.d});
+
+      float max_distance;
+      vec3f position2;
+      if (isec2.hit) {  // se ho colpito , setto la seconda posizione e la distanza percorsa dai due raggi
+        position2 = transform_point(instance.frame, eval_position(shape, isec2.element, isec2.uv));
+        max_distance = distance(position2, position);  
+      } else {                                  
+        position2           = position;
+        max_distance = isec.distance;
+      }
+     
+     ////material.density = max_distance/ material.density;
+      material.density = {0.99, 0.99, 0.99};
+     // auto prob = max_distance / material.density;
+     // auto r          = fmod(rand1f(rng), prob.x);
+     // auto percentage = (prob * 99) / 100;
+      // distanza proprorzionale alla trasmittanza
+      auto distance = sample_transmittance( material.density, max_distance, rand1f(rng), rand1f(rng));
+     // printf("maxd: %f | dens: %f %f %f | r: %f | prob: %f | perce: %f \n", max_distance, material.density.x,
+        //  material.density.y, material.density.z, r, prob.x,percentage.x);
+      if (distance <max_distance) {
+        vec3f scatter_point = position + distance * ray.d;  //punto all'interno dell'istanza in cui scattero
+    
+        auto  incoming  = sample_sphere( rand2f(rng));//direzione in cui scatterare
+        radiance +=  color * shade_indirect(scene, ray3f{scatter_point, incoming}, bounce + 1,max_bounces, bvh, rng);
+      } else {       // se non scattero, attraverso
+        radiance += shade_indirect(scene, ray3f{position, ray.d}, bounce + 1,
+                max_bounces, bvh, rng);
+      }
+      break;
     }
   }
   return radiance;
@@ -268,6 +281,38 @@ static vec4f shade_color(const scene_data& scene, const bvh_scene& bvh,
   return {color.x, color.y, color.z, 1.0};
 }
 
+static vec4f shade_matcap(const scene_data& scene, const bvh_scene& bvh,
+    const ray3f& ray, int bounce, rng_state& rng,
+    const raytrace_params& params) {
+
+
+  auto isec = intersect_bvh(bvh, scene, ray);
+  if (!isec.hit) return {0, 0, 0};
+
+  auto& instance    = scene.instances[isec.instance];
+  if (isec.element  == 0) {//per non distorcere  il mio pavimento
+    auto& material = eval_material(scene, instance, isec.element, isec.uv);
+    return vec4f{material.color.x, material.color.y, material.color.z, 1};
+  }
+  auto& shape       = scene.shapes[instance.shape];
+  auto  normal      = transform_direction(instance.frame, eval_normal(shape, isec.element, isec.uv));
+  //auto& material = eval_material(scene, instance, isec.element, isec.uv);
+  auto& material = scene.materials[isec.instance];
+  auto& texture  = scene.textures[material.color_tex];
+
+  //calcolo coordinate
+  vec3f reflected = reflect(-ray.d, normal);
+  float m         = 2.8284271247461903 * sqrt(reflected.z + 1.0);
+  auto  matcap    = reflected / m + 0.5;
+  auto  color    = xyz(eval_texture(texture, vec2f{matcap.x,matcap.y}));
+  
+  //applico il colore
+  color *= material.color;
+   
+  return vec4f{color.x, color.y, color.z, 1};
+
+}
+
 // Trace a single ray from the camera using the given algorithm.
 using raytrace_shader_func = vec4f (*)(const scene_data& scene,
     const bvh_scene& bvh, const ray3f& ray, int bounce, rng_state& rng,
@@ -280,6 +325,7 @@ static raytrace_shader_func get_shader(const raytrace_params& params) {
     case raytrace_shader_type::normal: return shade_normal;
     case raytrace_shader_type::texcoord: return shade_texcoord;
     case raytrace_shader_type::color: return shade_color;
+    case raytrace_shader_type::matcap: return shade_matcap;
     default: {
       throw std::runtime_error("sampler unknown");
       return nullptr;

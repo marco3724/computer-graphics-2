@@ -8,3 +8,10 @@
 
 
 .\bin\yraytrace --scene tests\refract\refract.json --output out\lowres\refract.jpg --samples 256 --bounces  8 --resolution 720
+
+
+.\bin\yraytrace --scene tests\13_cornellboxvolumetric\cornellbox.json --output out\lowres\13_cornellbox_512_256.jpg --samples 256 --resolution 512
+
+
+
+.\bin\yraytrace --scene tests\15_matcap\matcap.json --output out\extra\0x_matcap_720_9.jpg --samples 9 --shader matcap --resolution 720
